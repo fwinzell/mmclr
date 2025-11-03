@@ -1,0 +1,31 @@
+# simple_config.yaml
+
+experiment:
+  name: "simple classifier"
+  seed: 1
+
+data:
+  training:
+    clinical_path: "/data/pa_cpgarchive/projects/chimera/_aws/task1/clinical_data/"
+    main_dir: "/data/pa_cpgarchive/projects/chimera/_aws/task1/"
+    wsi_crop_size: 20000
+  
+  validation:
+    clinical_path: "/data/pa_cpgarchive/projects/chimera/_gc/task1/val/clinical_data/"
+    main_dir: "/data/pa_cpgarchive/projects/chimera/_gc/task1/val/"
+    wsi_crop_size: 20000
+
+model:
+  type: "MMCLS"
+  clinical_input_dim: 18
+  clinical_hidden_dim: 1024
+  perceiver_input_dim: 1024
+  perceiver_output_dim: 1000
+
+training:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 0.0001
+  optimizer: "Adam"
+  
+
