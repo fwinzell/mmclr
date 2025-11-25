@@ -1,7 +1,7 @@
 import json
 import os
 import pandas as pd
-import pyvips
+#import pyvips
 import SimpleITK
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,13 +15,15 @@ import random
 
 from torch.utils.data import Dataset
 
-
 class MRIDataset(Dataset):
     def __init__(self,
                  radiology_dir,
-                 pids=None):
+                 pids=None,
+                 mask=True # Controls whether the mask should be used to crop the tw2 image to ensure it has the same size (1xNx128x120)
+                 ):
         self.radiology_dir = radiology_dir
         self.pids = pids if pids is not None else self._load_patient_ids()
+        self.mask = mask
 
     def _load_patient_ids(self):
         # Load patient IDs from the radiology directory
@@ -47,15 +49,16 @@ class MRIDataset(Dataset):
         x_t2w = SimpleITK.ReadImage(glob.glob(os.path.join(folder, "*_t2w.mha"))[0])
         x_t2w = SimpleITK.GetArrayFromImage(x_t2w).astype(np.float32)
 
-        x_mask = SimpleITK.ReadImage(glob.glob(os.path.join(folder, "*_mask.mha"))[0])
-        x_mask = SimpleITK.GetArrayFromImage(x_mask)
+        if self.mask:
+            x_mask = SimpleITK.ReadImage(glob.glob(os.path.join(folder, "*_mask.mha"))[0])
+            x_mask = SimpleITK.GetArrayFromImage(x_mask)
 
-        idxs = np.where(x_mask == 1)
-    
-        ymid = int(np.median(np.sort(idxs[1])))
-        xmid = int(np.median(np.sort(idxs[2])))
+            idxs = np.where(x_mask == 1)
+        
+            ymid = int(np.median(np.sort(idxs[1])))
+            xmid = int(np.median(np.sort(idxs[2])))
 
-        x_t2w = x_t2w[:, ymid-64:ymid+64, xmid-60:xmid+60]
+            x_t2w = x_t2w[:, ymid-64:ymid+64, xmid-60:xmid+60]
 
         return {
             'pid': pid,
@@ -66,9 +69,24 @@ class MRIDataset(Dataset):
 
 
 
+def pre_process_mri(dataset):
+    from monai.networks.nets import resnet
+    model = resnet.resnet18(pretrained=True, spatial_dims=3, n_input_channels=1, feed_forward=False,
+                            shortcut_type='A')
+    
+    sample = dataset[0]
+    with torch.no_grad():
+        emb_adc = model(sample['adc'].unsqueeze(0))
+        emb_hbv = model(sample['hbv'].unsqueeze(0))
+        emb_t2w = model(sample['t2w'].unsqueeze(0))
+
+    print(f"Embedding shapes: ADC: {emb_adc.shape}, HBV: {emb_hbv.shape}, T2W: {emb_t2w.shape}")
+
+
+
 if __name__ == "__main__":
     main_dir = "/Volumes/PA_CPGARCHIVE/projects/chimera/_aws/task1/radiology/images"
-    dataset = MRIDataset(radiology_dir=main_dir)
+    dataset = MRIDataset(radiology_dir=main_dir, mask=False)
     print(f"Number of patients in dataset: {len(dataset)}")
 
     sample = dataset[0]
@@ -77,3 +95,7 @@ if __name__ == "__main__":
     print(f"HBV shape: {sample['hbv'].shape}")
     print(f"T2W shape: {sample['t2w'].shape}")
     print(f"Patient ID: {sample['pid']}")
+
+    pre_process_mri(dataset)
+
+

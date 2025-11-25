@@ -1,0 +1,36 @@
+# simple_config.yaml
+
+experiment:
+  name: "simple classifier"
+  seed: 1
+  mounted_dir: "/Volumes/PA_CPGARCHIVE/projects/chimera/"
+  save_dir: "/Users/filipwinzell/Python/Radboud/MMCLR/experiments/"
+
+data:
+  training:
+    clinical_path: "/Volumes/PA_CPGARCHIVE/projects/chimera/_aws/task1/clinical_data/"
+    main_dir: "/Volumes/PA_CPGARCHIVE/projects/chimera/_aws/task1/"
+    wsi_crop_size: 20000
+  
+  validation:
+    clinical_path: "/Volumes/PA_CPGARCHIVE/projects/chimera/_gc/task1/val/clinical_data/"
+    main_dir: "/Volumes/PA_CPGARCHIVE/projects/chimera/_gc/task1/val/"
+    wsi_crop_size: 20000
+
+model:
+  type: "ViT"
+  clinical_input_dim: 14
+  clinical_hidden_dim: 512
+  clinical_output_dim: 1024
+  feature_dim: 1024
+  perceiver_output_dim: 1000
+  num_modalities: 3
+  vit_num_features: 2306 #(48*48 + 2)
+
+training:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 0.0001
+  optimizer: "Adam"
+  
+

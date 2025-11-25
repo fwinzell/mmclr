@@ -14,7 +14,8 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 from monai.networks.nets import resnet
-
+from datasets import CLRDataset
+from main_moco import load_config
 
 class ClinicalDataset(Dataset):
     def __init__(self, 
@@ -238,11 +239,15 @@ def load_tw2_with_mask(i):
     #    cv2.imshow(f"Slice", img)
    #cv2.waitKey(500)  # Wait for a key press to show the next
 
+def load_keyfile(path):
+    keydf = pd.read_excel(path)
+    return keydf
+
 
 def gen_mri_embeddings(i):
     t2w_arr = load_tw2_with_mask(i)
     model = resnet.resnet18(pretrained=True, spatial_dims=3, n_input_channels=1, feed_forward=False,
-                            shortcut_type='A', bias_downsample=True)
+                            shortcut_type='A')
 
     x = torch.tensor(t2w_arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0) 
     print(f"Input tensor shape: {x.shape}")
@@ -252,11 +257,50 @@ def gen_mri_embeddings(i):
     return embeddings
 
 
+def test_clr_dataset(config_path):
+    config = load_config(config_path=config_path)
+    keyfile = f"{config.experiment['mounted_dir']}/prostate/patient_data/MICCAI_keyfiles/MICCAI_keyfile0306251636.xlsx"
+    patient_info = pd.read_excel(keyfile, usecols=["miccai_id", "Split", "BCR", "BCR_PSA"])
+    train_ids = patient_info.loc[patient_info["Split"] == "train", "miccai_id"].tolist()
+
+    print(f"Number of patients: {len(train_ids)}")
+
+    dataset = CLRDataset(
+        clinical_data_folder=config.data["clinical_path"],
+        pathology_dir=os.path.join(config.data["main_dir"], "pathology/features"),
+        radiology_dir=os.path.join(config.data["main_dir"], "radiology/images"),
+        wsi_crop_grid=1,
+        clinical_dropout=config.training["clinical_dropout"],
+        mri_dropout=config.training["mri_dropout"],
+        feature_extractor="resnet",
+        mri_input_size=(25, 128, 120),
+        pids=train_ids,
+        use_frofa=True,
+        mri_include=['t2w', 'adc', 'hbv'],
+        verbose=True
+    )
+    loader = DataLoader(dataset=dataset, batch_size=1)
+
+    for query, key in loader:
+        radiology_q = query[1]
+
+        slices = 25
+        for s in range(slices):
+            img = np.array(radiology_q['t2w'].squeeze()[s,:,:])
+            print(img.shape)
+            img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            cv2.imshow(f"Slice {s+1}/{slices}", img)
+            cv2.waitKey(500)  # Wait for a key press to show the next
+            cv2.destroyAllWindows()
+        
+        
+            
+
+
 
 if __name__ == "__main__":
     #load_and_display_wsi('1021', max_size=2000)
 
-    #load_and_display_mri(0, mri_type="dce")
 
     #for j in range(5): load_radiology(j)
     #load_pathology()
@@ -264,10 +308,16 @@ if __name__ == "__main__":
     #load_tw2_with_mask(0)
     #emb = gen_mri_embeddings(0)
 
+    config_path = "/Users/filipwinzell/Python/Radboud/MMCLR/configs/moco_config_local.yaml"
+    test_clr_dataset(config_path=config_path)
+
+    """
+    keydf = load_keyfile("/Volumes/PA_CPGARCHIVE/projects/chimera/prostate/patient_data/MICCAI_keyfiles/MICCAI_keyfile0306251636.xlsx")
+
     local_path = "/Volumes/PA_CPGARCHIVE/projects/chimera/_aws/task1/clinical_data/"
-    sol_path = "/data/pa_cpgarchive/projects/chimera/_aws/task1/clinical_data/"
+    sol_path = "/data/pa_cpgarchive/projects/chimera/_gc/task1/val/clinical_data/"
     clidat = ClinicalDataset(clinical_data_folder=local_path,
-                             exclude_keys=["BCR"])
+                             exclude_keys=[])
     clidat.print_head()
 
     dataloader = DataLoader(clidat, batch_size=1, shuffle=True)
@@ -279,5 +329,5 @@ if __name__ == "__main__":
         outputs = model(batch)
         print(outputs.shape)
         break
-
+    """
     

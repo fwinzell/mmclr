@@ -1,14 +1,16 @@
 # simple_config.yaml
 
 experiment:
-  name: "simple classifier"
+  name: "simple_classifier"
   seed: 1
+  mounted_dir: "/data/pa_cpgarchive/projects/chimera/"
+  save_dir: "/data/temporary/filip/MMCLR/experiments/"
 
 data:
   training:
     clinical_path: "/data/pa_cpgarchive/projects/chimera/_aws/task1/clinical_data/"
     main_dir: "/data/pa_cpgarchive/projects/chimera/_aws/task1/"
-    wsi_crop_size: 20000
+    wsi_crop_size: 1000
   
   validation:
     clinical_path: "/data/pa_cpgarchive/projects/chimera/_gc/task1/val/clinical_data/"
@@ -16,16 +18,20 @@ data:
     wsi_crop_size: 20000
 
 model:
-  type: "MMCLS"
-  clinical_input_dim: 18
-  clinical_hidden_dim: 1024
-  perceiver_input_dim: 1024
+  type: "ViT"
+  clinical_input_dim: 14
+  clinical_hidden_dim: 512
+  clinical_output_dim: 1024
+  feature_dim: 1024
   perceiver_output_dim: 1000
+  num_modalities: 3
+  vit_num_features: 2306 #(48*48 + 2)
+
 
 training:
   epochs: 50
-  batch_size: 1
+  batch_size: 1 
   learning_rate: 0.0001
   optimizer: "Adam"
-  
+
 

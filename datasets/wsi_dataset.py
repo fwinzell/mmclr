@@ -1,8 +1,6 @@
 import json
 import os
 import pandas as pd
-import pyvips
-import SimpleITK
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -19,10 +17,12 @@ class UNIDataset(Dataset):
     def __init__(self, 
                  features_dir,
                  crop_size,
+                 crop_grid=48,
                  pids=None):
         
         self.features_dir = features_dir
-        self.crop_size = crop_size  
+        self.crop_size = crop_size
+        self.crop_grid = crop_grid  
         self.pids = pids if pids is not None else self._get_all_pids()
 
     def _get_all_pids(self):
@@ -61,12 +61,68 @@ class UNIDataset(Dataset):
         coordinates = coordinates[crop_indices]
 
         return features, coordinates
+    
+    def _get_random_grid(self, pid):
+        feature_paths = glob.glob(os.path.join(self.features_dir, "features", f"{pid}_*.pt"))
+        coord_paths = glob.glob(os.path.join(self.features_dir, "coordinates", f"{pid}_*.npy"))
+
+        idx = np.random.randint(0, len(feature_paths))
+        feature_path = feature_paths[idx]
+        coord_path = coord_paths[idx]
+
+        features = torch.load(feature_path)  # Shape: (N, D)
+        coordinates = np.load(coord_path)  # Shape: (N, 2)
+
+        coords = np.array(coordinates.tolist())[:,0:2].astype(int)
+        #patch_sizes = np.array(coordinates.tolist())[:,2].astype(int)
+
+        x_coords = np.sort(np.unique(coords[:, 0]))
+        y_coords = np.sort(np.unique(coords[:, 1]))
+
+        x_start_idx = np.random.randint(0, len(x_coords) - self.crop_grid)
+        y_start_idx = np.random.randint(0, len(y_coords) - self.crop_grid)
+        
+        x_coords = x_coords[x_start_idx : x_start_idx + self.crop_grid]
+        y_coords = y_coords[y_start_idx : y_start_idx + self.crop_grid]
+
+        grid_coords = np.array(np.meshgrid(x_coords, y_coords)).T.reshape(-1, 2)
+        
+        crop_indices = np.where(np.all(np.isin(coords, grid_coords), axis=1))[0]
+        
+        features = features[crop_indices]
+        coordinates = coordinates[crop_indices]
+
+        return features, coordinates
+
+    
+    def _get_random_fixed_patches(self, pid):
+        feature_paths = glob.glob(os.path.join(self.features_dir, "features", f"{pid}_*.pt"))
+        coord_paths = glob.glob(os.path.join(self.features_dir, "coordinates", f"{pid}_*.npy"))
+
+        idx = np.random.randint(0, len(feature_paths))
+        feature_path = feature_paths[idx]
+        coord_path = coord_paths[idx]
+
+        num_patches_needed = self.crop_grid * self.crop_grid
+
+        features = torch.load(feature_path)  # Shape: (N, D)
+        coordinates = np.load(coord_path)  # Shape: (N, 2)
+
+        #coords = np.array(coordinates.tolist())[:,0:2].astype(int)
+        #patch_sizes = np.array(coordinates.tolist())[:,2].astype(int)
+
+        idx = np.random.randint(0, features.shape[0]-num_patches_needed)
+        
+        features = features[idx:idx+num_patches_needed]
+        coordinates = coordinates[idx:idx+num_patches_needed]
+
+        return features, coordinates
 
 
     def __getitem__(self, idx):
         pid = self.pids[idx]
 
-        features, coords = self._get_random_crop(pid)
+        features, coords = self._get_random_fixed_patches(pid)
 
         return features, coords
     
@@ -75,7 +131,8 @@ if __name__ == "__main__":
     main_dir = "/Volumes/PA_CPGARCHIVE/projects/chimera/_aws/task1/pathology/features"
 
     dataset = UNIDataset(features_dir=main_dir,
-                         crop_size=20000)
+                         crop_size=20000,
+                         crop_grid=48)
     
     features, coords = dataset[0]
     print(f"Features shape: {features.shape}")
