@@ -6,6 +6,7 @@ import timm
 from perceiver_pytorch import Perceiver, PerceiverIO
 
 from .vit import ViTModel
+from .admil import ADMIL_Model
 
 from .moco import MoCo
 
@@ -15,12 +16,14 @@ from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 
 # simple MLP for clinical data features
 class CMLP(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.5):
+    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.5, use_softmax=False):
         super(CMLP, self).__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.relu = nn.ReLU()
         self.dropout = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.use_softmax = use_softmax
+        self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, x):
         x = self.fc1(x)
@@ -29,6 +32,10 @@ class CMLP(nn.Module):
         x = self.fc2(x)
         if x.dim() == 2:
             x = x.unsqueeze(1)
+
+        if self.use_softmax:
+            x = self.softmax(x)
+
         return x
     
 
@@ -271,6 +278,18 @@ class MMCLSModel(nn.Module):
 
 
 class MoCoWrapper(MoCo):
+    """
+    Custom wrapper for MoCo training
+    original MoCo model as super class
+    
+    :base_encoder: Model class for the base encoder - key and query encoders will be instances of this class
+    :encoder_args: Dict of keyword arguments to be passed when initializing the encoders
+    :dim: Feature dimension size
+    :K: Length of queue, 65536 in original paper
+    :m: MoCo momentum for updating key encoder
+    :T: Softmax temperature
+    :do_batch_shuffle: if True, shuffle batches
+    """
     def __init__(self, 
                     base_encoder,
                     device,
@@ -279,7 +298,7 @@ class MoCoWrapper(MoCo):
                     K: int = 1000, # queue size
                     m: float = 0.999, # moco momentum
                     T: float = 0.07, # softmax temperature
-                    do_batch_shuffle: bool = False, # Do batch shuffling, does not make sense with batch size = 1?
+                    do_batch_shuffle: bool = False, 
                     ):
         super(MoCoWrapper, self).__init__(base_encoder=base_encoder,
                                           encoder_args=encoder_args,
@@ -302,8 +321,9 @@ class MoCoWrapper(MoCo):
         """
 
         # compute query features
-        q = self.encoder_q(input_q)  # queries: NxC
-        q = nn.functional.normalize(q, dim=1)
+        with torch.cuda.amp.autocast():
+            q = self.encoder_q(input_q)  # queries: NxC
+        q = nn.functional.normalize(q.float(), dim=1)
 
         # compute key features
         with torch.no_grad():  # no gradient to keys
@@ -313,8 +333,9 @@ class MoCoWrapper(MoCo):
             if self.do_batch_shuffle:
                 input_k, idx_unshuffle = self._batch_shuffle_ddp(input_k)
 
-            k = self.encoder_k(input_k)  # keys: NxC
-            k = nn.functional.normalize(k, dim=1)
+            with torch.cuda.amp.autocast():
+                k = self.encoder_k(input_k)  # keys: NxC
+            k = nn.functional.normalize(k.float(), dim=1)
 
             # undo shuffle
             if self.do_batch_shuffle:
@@ -359,7 +380,7 @@ class ClassifierHead(nn.Module):
                 nn.Linear(hidden_dim, num_output)
             )
         else:
-            self.fc = nn.Linear(input_dim. num_output)
+            self.fc = nn.Linear(input_dim, num_output)
 
         self.op = op
 
@@ -369,6 +390,106 @@ class ClassifierHead(nn.Module):
         y_hat = torch.where(y_prob > self.op, 1, 0)
         return logits, y_prob, y_hat
 
+
+class MMSurvivalModel(nn.Module):
+    def __init__(self,
+                 clinical_input_dim,
+                 clinical_hidden_dim=512,
+                 feature_dim=1024,
+                 num_modalities=3,
+                 use_modality_embeddings=False,
+                 model_type="admil",
+                 *args,
+                 **kwargs
+                 ):
+        super(MMSurvivalModel, self).__init__()
+
+        self.mod_emb = use_modality_embeddings
+        self.use_softmax = kwargs.get("use_softmax", False)
+
+        self.clinical_mlp = CMLP(clinical_input_dim, clinical_hidden_dim, feature_dim, use_softmax=self.use_softmax)
+
+        self.clinical_dim = clinical_input_dim
+        self.F = feature_dim
+
+        self.mri_encoder = MRIEncoder(multiparametric=True, 
+                                      path_to_weights=kwargs.get("mri_resnet_weights", None))
+        self.projector = nn.Sequential(
+            nn.Linear(512, self.F),
+            #nn.ReLU(),
+            #nn.Linear(self.F, self.F)
+            nn.Softmax(dim=-1) if self.use_softmax else nn.Identity()
+        )
+
+        if model_type == "classifier":
+            self.model = ClassifierHead(input_dim=self.F, 
+                                         hidden_dim=None,
+                                         num_output=1)
+        elif model_type == "admil":
+            self.model = ADMIL_Model(n_classes=kwargs.get("n_bins", 1),
+                                     hidden_layers=kwargs.get("admil_hidden_layers", 0),
+                                     feature_size=self.F,
+                                     dropout=True)
+        
+        if self.mod_emb:
+            self.modality_embeddings = nn.Parameter(torch.randn(num_modalities, self.F))
+            nn.init.trunc_normal_(self.modality_embeddings, std=0.02)
+        
+    def forward(self, input_data): #clinical_data, mri_data, wsi_data):
+        clinical_data, mri_data, wsi_features = input_data
+
+        features = []
+        modality_idxs = []
+       # ---------- Clinical ----------
+        if clinical_data is not None:
+            assert clinical_features.shape[-1] == self.clinical_dim, f"Expected clinical dim: {self.clinical_dim}, got shape {clinical_features.shape}"
+
+            clinical_features = self.clinical_mlp(clinical_data)
+
+            if clinical_features.dim() == 2:
+                clinical_features = clinical_features.unsqueeze(1)
+
+            features.append(clinical_features)
+            modality_idxs.extend([0] * clinical_features.shape[1])
+
+        # ---------- MRI ----------
+        if mri_data is not None:
+
+            with torch.no_grad():
+                mri_features = self.mri_encoder(mri_data)
+
+            mri_features = self.projector(mri_features)
+
+            if mri_features.dim() == 2:
+                mri_features = mri_features.unsqueeze(1)
+
+            features.append(mri_features)
+            modality_idxs.extend([1] * mri_features.shape[1])
+
+        # ---------- WSI ----------
+        if wsi_features is not None:
+
+            if wsi_features.dim() == 2:
+                wsi_features = wsi_features.unsqueeze(1)
+
+            features.append(wsi_features)
+            modality_idxs.extend([2] * wsi_features.shape[1])
+
+        if len(features) == 0:
+            raise ValueError("All modalities missing for this input")
+        
+        x = torch.cat(features, dim=1)
+
+        if self.mod_emb:
+        
+            modality_idxs = torch.tensor(modality_idxs).to(x.device)
+            modality_idxs = modality_idxs.unsqueeze(0).repeat(x.shape[0], 1)
+            modality_emb = self.modality_embeddings[modality_idxs]
+            x = x + modality_emb
+
+        output = self.model(x)  
+
+        return output
 
 
 def test_mm_model(model_type="mmclr"):

@@ -17,6 +17,8 @@ class TransformMRI:
         self.include = modality_keys
         self.do_mask = apply_query_mask
         self.img_size = np.array(kwargs.get("input_size", [25, 128, 120]))
+
+        self.two_views = kwargs.get("two_views", True)
         
         self.num_ctrl_points = 7
         self.max_disp = (self.img_size / (self.num_ctrl_points - 1))*0.1
@@ -51,13 +53,16 @@ class TransformMRI:
 
 
     def __call__(self, x):
-        q = self.apply_transformation(x)
-        k = self.apply_transformation(x)
+        if self.two_views:
+            q = self.apply_transformation(x)
+            k = self.apply_transformation(x)
 
-        if self.do_mask:
-            q = self._modality_mask(q)
+            if self.do_mask:
+                q = self._modality_mask(q)
 
-        return q, k
+            return q, k
+        else:
+            return self.apply_transformation(x)
 
 
 class FroFA:

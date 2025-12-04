@@ -1,10 +1,25 @@
-from datasets import MMCLS_Dataset
-from MMCLR.main_simple_cls import parse_args, load_config
-from models import MMCLRModel, MMViTModel, MMCLSModel
+from datasets import MMCLS_Dataset, CWZDataset
+from models import MMCLRModel, MMViTModel, MMCLSModel, MMSurvivalModel
 
 import torch
 import os
 from types import SimpleNamespace
+import numpy as np
+from tqdm import tqdm
+import argparse
+import yaml
+
+def parse_args():
+    parser = argparse.ArgumentParser(description='Test script')
+    parser.add_argument('--config', type=str, help='Path to the config file')
+    args = parser.parse_args()
+    return args
+
+def load_config(model_path, name="surv_super"):
+    config_path = os.path.join(os.path.dirname(model_path), f"{name}_config.yaml")
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+    return SimpleNamespace(**config)
 
 def to_device(data, device):
         if isinstance(data, (list, tuple)):
@@ -15,8 +30,7 @@ def to_device(data, device):
             return data.to(device)
 
 def simple_classifier(model_path):
-    args = parse_args()
-    config = load_config(args.config)
+    config = load_config(model_path)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -86,8 +100,72 @@ def simple_classifier(model_path):
 
     return predictions
 
+
+def surivial_analysis(model_path):
+    from sksurv.metrics import concordance_index_censored
+
+    #args = parse_args()
+    config = load_config(model_path)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    keyfile = f"{config.experiment['mounted_dir']}/prostate/patient_data/MICCAI_keyfiles/MICCAI_keyfile0306251636.xlsx"
+
+    # Set random seed for reproducibility
+    torch.manual_seed(config.experiment["seed"])
+
+    clinical_vars = config.data["clinical_vars"]
+
+    dataset = CWZDataset(keyfile=keyfile, main_dir=config.experiment["main_dir"], n_bins=config.model["num_time_bins"], 
+                         mri_input_size=(20,128,120), wsi_fm_model="prism", augment=False, clinical_vars=clinical_vars)
+    dataset.select_split("test")
+
+    model = MMSurvivalModel(clinical_input_dim=dataset.get_num_clinical_vars(), 
+                            feature_dim=config.model['feature_dim'],
+                            num_modalities=3,
+                            use_modality_embeddings=True,
+                            model_type="admil",
+                            n_bins=config.model["num_time_bins"]
+                            ).to(device)
+    
+    model.load_state_dict(torch.load(model_path, weights_only=True, map_location=device), strict=True)
+    model.eval()
+
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+
+    risk_scores = np.zeros(len(dataloader))
+    indicators = np.zeros(len(dataloader))
+    event_times = np.zeros(len(dataloader))
+
+    with torch.no_grad():
+        loop = tqdm(dataloader)
+        for i, (inst, label) in enumerate(loop):
+            inst = to_device(inst, device) 
+            label = to_device(label, device)
+
+            logits, hazards, y_hat = model(inst)
+
+            S = torch.cumprod(1 - hazards, dim=-1)
+            risk = -torch.sum(S, dim=1).detach().cpu().numpy()
+
+            risk_scores[i] = risk[0]
+            indicators[i] = label['indicator']
+            event_times[i] = label['event_time']
+    
+    c_index = concordance_index_censored(indicators.astype(bool), event_times, risk_scores, tied_tol=1e-8)[0]
+
+    print("C-index:", c_index)
+
+
 if __name__ == "__main__":
+    model_name = "surv_super_2025-12-03"
+    path = f"/data/temporary/filip/MMCLR/experiments/{model_name}/version_0/{model_name}_best.pth"
+    surivial_analysis(path)
+
+    """
     path = "/data/temporary/filip/MMCLR/experiments/simple_classifier/version_2/simple_classifier_last.pth"
     preds = simple_classifier(path)
     for true, pred in preds.items():
         print(f"True Label: {true.item()}, Predicted Class: {pred}")
+    """
+    

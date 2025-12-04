@@ -44,6 +44,7 @@ def main():
                              dim=config.moco["dim"],
                              m=config.moco["m"],
                              T=config.moco["T"],
+                             do_batch_shuffle=True,
                              device=device).to(device)
 
     keyfile = f"{config.experiment['mounted_dir']}/prostate/patient_data/MICCAI_keyfiles/MICCAI_keyfile0306251636.xlsx"

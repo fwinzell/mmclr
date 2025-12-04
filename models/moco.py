@@ -166,8 +166,7 @@ class MoCo(nn.Module):
         """
 
         # compute query features
-        with torch.cuda.amp.autocast():
-            q = self.encoder_q(im_q)  # queries: NxC
+        q = self.encoder_q(im_q)  # queries: NxC
         q = nn.functional.normalize(q, dim=1)
 
         # compute key features

@@ -17,6 +17,7 @@ class GenericTrainer(object):
                  val_dataset,
                  max_epochs,
                  batch_size,
+                 collate_fn,
                  learning_rate,
                  optimizer_name,
                  device,
@@ -38,6 +39,7 @@ class GenericTrainer(object):
         self.batch_sz = batch_size
         self.lr = learning_rate
         self.optimizer_name = optimizer_name
+        self.collate_fn = collate_fn
 
         if optimizer_hparams is None:
             optimizer_hparams = {'lr': learning_rate,
@@ -73,12 +75,12 @@ class GenericTrainer(object):
         self.best_acc = 0
 
     def train_dataloader(self):
-        return DataLoader(self.tr_dataset, batch_size=self.batch_sz,
-                          shuffle=True, drop_last=False, num_workers=self.workers)
+        return DataLoader(self.tr_dataset, batch_size=self.batch_sz, shuffle=True, 
+                          drop_last=False, num_workers=self.workers, collate_fn=self.collate_fn)
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_sz,
-                          shuffle=False, drop_last=False, num_workers=self.workers)
+        return DataLoader(self.val_dataset, batch_size=self.batch_sz, shuffle=False, 
+                          drop_last=False, num_workers=self.workers, collate_fn=self.collate_fn)
 
     def get_model(self):
         return self.model

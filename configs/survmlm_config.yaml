@@ -7,8 +7,8 @@ experiment:
   main_dir: "/data/temporary/filip/cohorts/cwz_retrospective"
 
 data:
-  clinical_path: "/data/pa_cpgarchive/projects/chimera/_aws/task1/clinical_data/"
-  main_dir: "/data/pa_cpgarchive/projects/chimera/_aws/task1/"
+  pathology_dir: "/data/temporary/filip/cohorts/cwz_retrospective/wsi_embeddings/prism"
+  radiology_dir: "/data/pa_cpgarchive/projects/chimera/_aws/task1/radiology/images"
   clinical_vars: 
   - "anon_pid" 
   - "age_at_prostatectomy"
@@ -20,16 +20,10 @@ data:
   - "positive_surgical_margins"
   - "invasion_seminal_vesicles"
   - "lymphovascular_invasion"
-
-validation:
-  clinical_path: "/data/pa_cpgarchive/projects/chimera/_gc/task1/val/clinical_data/"
-  main_dir: "/data/pa_cpgarchive/projects/chimera/_gc/task1/val/"
-
   
 model:
   num_time_bins: 5
   feature_dim: 1280
-
 
 training:
   loss: "nll" 

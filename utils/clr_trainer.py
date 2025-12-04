@@ -8,6 +8,14 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
 class MoCoTrainer(object):
+    """
+    Trainier class for MoCo training
+
+    model: MoCo model
+    batch_size: actual batch size to be used when dataloading
+    virtual_batch_size: accumulate batches by setting this number to a number larger than batch size
+                        this creates a virtual batch size which is larger than what the memory can handle
+    """
     def __init__(self,
                  model,
                  dataset,

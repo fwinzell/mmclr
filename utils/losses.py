@@ -78,3 +78,50 @@ class CoxSurvLoss(object):
         exp_theta = torch.exp(theta)
         loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * (1-c))
         return loss_cox
+    
+# Modified Loss from SimMLM
+# Survival task loss (NLLSurvLoss) + our MoFe loss
+class BlendedLoss(object):
+    def __init__(
+            self, alpha=0.15, compute_ranking_loss=False,
+            surv_loss_weight=1, ranking_loss_weight=0
+    ):
+        super().__init__()
+        self.nll = NLLSurvLoss(alpha=alpha)
+        self.compute_ranking_loss = compute_ranking_loss
+        self.surv_loss_weight = surv_loss_weight
+        self.ranking_loss_weight = ranking_loss_weight
+
+    def forward(self, hazards: torch.Tensor, labels: torch.Tensor):
+        """Compute Dice Loss & Binary Cross Entropy
+
+        Args:
+            hazards (Tensor): [B, C, ...]
+            labels (Tensor): [B, C, ...]
+        """
+        
+        nll_loss = self.nll(hazards, labels)
+
+        if self.compute_ranking_loss:
+            nll_loss = nll_loss.mean(dim=[_ for _ in range(2, len(nll_loss.shape))])
+
+            nll_loss_more = nll_loss[:nll_loss.shape[0] // 2]
+            nll_loss_less = nll_loss[nll_loss.shape[0] // 2:]
+
+            nll_diff = nll_loss_more - nll_loss_less
+            nll_diff = torch.clamp(nll_diff, min=0)
+            ranking_loss = nll_diff.mean() 
+
+            surv_loss = nll_loss.mean() 
+
+            loss_dict = {
+                'task_loss': surv_loss * self.surv_loss_weight + ranking_loss * self.ranking_loss_weight,
+                'surv_loss': surv_loss,
+                'ranking_loss': ranking_loss
+            }
+        else:
+            loss_dict = {
+                'task_loss': nll_loss.mean() 
+            }
+
+        return loss_dict
